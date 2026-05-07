@@ -1,0 +1,31 @@
+# Data files
+data/
+*.fits
+*.fits.gz
+*.npy
+*.parquet
+*.pkl
+*.pt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Environment
+.env
+.venv/
+venv/
