@@ -137,16 +137,43 @@ def get_visit_spectra(apogee_id, telescope="apo25m", field=None, cache_dir=None)
         error_visits = error_all[1:, :]
         bitmask_visits = bitmask[1:, :] if bitmask.ndim > 1 else None
 
-        # Per-visit RVs and MJDs from the RV table (HDU 9 in apStar files)
-        rv_table = hdul[9].data if len(hdul) > 9 else None
-        if rv_table is not None:
-            rv_per_visit = np.array(rv_table["VHELIO"], dtype=np.float64)[:n_visits]
-            mjd_per_visit = np.array(rv_table["MJD"], dtype=np.float64)[:n_visits]
-            snr_per_visit = np.array(rv_table["SNR"], dtype=np.float32)[:n_visits]
-        else:
-            rv_per_visit = np.full(n_visits, np.nan)
-            mjd_per_visit = np.full(n_visits, np.nan)
-            snr_per_visit = np.full(n_visits, np.nan)
+        # Per-visit RVs and MJDs from the RV table
+        # DR17 apStar files vary in HDU layout and column names
+        rv_per_visit = np.full(n_visits, np.nan)
+        mjd_per_visit = np.full(n_visits, np.nan)
+        snr_per_visit = np.full(n_visits, np.nan)
+
+        for hdu_idx in range(len(hdul)):
+            if hdul[hdu_idx].data is None:
+                continue
+            try:
+                colnames = [c.upper() for c in hdul[hdu_idx].columns.names]
+            except (AttributeError, TypeError):
+                continue
+
+            # Look for the HDU containing per-visit RV data
+            has_rv = any(c in colnames for c in ["VHELIO", "VHELIO_AVG", "BC", "VREL"])
+            has_time = any(c in colnames for c in ["MJD", "JD", "BJDOBS", "MJD-OBS"])
+            if has_rv or has_time:
+                rv_tab = hdul[hdu_idx].data
+                actual_cols = hdul[hdu_idx].columns.names
+                col_map = {c.upper(): c for c in actual_cols}
+
+                for rv_key in ["VHELIO", "VREL", "BC"]:
+                    if rv_key in col_map:
+                        rv_per_visit = np.array(rv_tab[col_map[rv_key]], dtype=np.float64)[:n_visits]
+                        break
+
+                for mjd_key in ["MJD", "JD", "BJDOBS", "MJD-OBS"]:
+                    if mjd_key in col_map:
+                        mjd_per_visit = np.array(rv_tab[col_map[mjd_key]], dtype=np.float64)[:n_visits]
+                        break
+
+                for snr_key in ["SNR", "SN"]:
+                    if snr_key in col_map:
+                        snr_per_visit = np.array(rv_tab[col_map[snr_key]], dtype=np.float32)[:n_visits]
+                        break
+                break
 
     return {
         "flux": flux_visits,
