@@ -82,8 +82,8 @@ def compute_ccf(flux, wavelength, template_flux, rv_range=(-300, 300), rv_step=1
     # Asymmetry: ratio of area on blue vs red side of peak
     blue_mask = (rv_grid < rv_peak) & (rv_grid > rv_peak - 100)
     red_mask = (rv_grid > rv_peak) & (rv_grid < rv_peak + 100)
-    blue_area = np.trapz(ccf[blue_mask], rv_grid[blue_mask]) if blue_mask.any() else 0
-    red_area = np.trapz(ccf[red_mask], rv_grid[red_mask]) if red_mask.any() else 0
+    blue_area = np.trapezoid(ccf[blue_mask], rv_grid[blue_mask]) if blue_mask.any() else 0
+    red_area = np.trapezoid(ccf[red_mask], rv_grid[red_mask]) if red_mask.any() else 0
     asymmetry = (blue_area - red_area) / (blue_area + red_area) if (blue_area + red_area) > 0 else 0.0
 
     return {
@@ -144,7 +144,7 @@ def measure_line_properties(flux, wavelength, region):
     fl = flux[mask]
 
     # Equivalent width (integral of 1 - flux)
-    ew = np.trapz(1.0 - fl, wl)
+    ew = np.trapezoid(1.0 - fl, wl)
 
     # Line depth
     line_depth = 1.0 - np.min(fl)
@@ -160,8 +160,8 @@ def measure_line_properties(flux, wavelength, region):
 
     # Asymmetry: compare blue and red halves
     min_idx = np.argmin(fl)
-    blue_ew = np.trapz(1.0 - fl[:min_idx+1], wl[:min_idx+1]) if min_idx > 0 else 0
-    red_ew = np.trapz(1.0 - fl[min_idx:], wl[min_idx:]) if min_idx < len(fl)-1 else 0
+    blue_ew = np.trapezoid(1.0 - fl[:min_idx+1], wl[:min_idx+1]) if min_idx > 0 else 0
+    red_ew = np.trapezoid(1.0 - fl[min_idx:], wl[min_idx:]) if min_idx < len(fl)-1 else 0
     total_ew = blue_ew + red_ew
     asymmetry_index = (blue_ew - red_ew) / total_ew if total_ew > 0 else 0.0
 

@@ -29,3 +29,103 @@ Histogram of log10(VSCATTER) for stars with NVISITS >= 3.
   - Red (binary threshold, 1.0 km/s) at log10 = 0.0, further into the tail.
 - **Class balance:** ~70-80% single (below 0.3 km/s), ~10-15% ambiguous (0.3–1.0 km/s, discarded), ~10-15% binary (above 1.0 km/s).
 - The clean separation between the main peak and the binary tail validates the threshold choice. The intermediate zone we discard is small, minimizing label noise.
+
+## VSCATTER Distribution — Filtered Sample (linear scale)
+
+Histogram of raw VSCATTER (km/s) for the quality-filtered sample (SNR >= 50, NVISITS >= 3, clean flags, Teff/logg cuts).
+
+- **Extremely right-skewed** in linear space. Almost all stars are between 0 and ~50 km/s, with a huge spike near 0.
+- This is expected — most stars are single with very small RV scatter, and a small fraction of binaries produce the long right tail.
+- Linear scale compresses the interesting structure; log scale (as in notebook 01) is much more informative for seeing the binary/single separation.
+- The skewness itself is a useful signal: it confirms that high-VSCATTER stars are rare outliers from the bulk population, consistent with a distinct binary subpopulation rather than a smooth continuum of RV variability.
+
+## Label Assignment Results
+
+Applied VSCATTER thresholds to the filtered sample (~343K stars after quality cuts):
+
+- **Binary (VSCATTER > 1.0 km/s):** 23,318 stars (6.8% of filtered, 7.4% of labeled)
+- **Single (VSCATTER < 0.3 km/s):** 291,871 stars (85.0% of filtered, 92.6% of labeled)
+- **Ambiguous (0.3–1.0 km/s, discarded):** 28,153 stars (8.2% of filtered)
+- **Total labeled sample:** 315,189 stars
+- **Class ratio:** 12.5:1 (single:binary)
+
+### Notes:
+- Binary fraction (7.4%) is lower than the initial ~10-15% estimate. This is because the quality cuts (especially SNR >= 50) bias toward well-observed stars, and the 1.0 km/s threshold is conservative.
+- 12.5:1 imbalance is manageable with class_weight="balanced" (RF) and pos_weight (CNN BCEWithLogitsLoss). Without these, a naive model would get 92.6% accuracy by predicting all single.
+- The ambiguous zone (28K stars, 8.2%) is small — we're not discarding too much data, and the gap between thresholds reduces label noise at the decision boundary.
+- 315K labeled stars is more than enough for both RF and CNN training.
+
+## Label Systematics Check
+
+Four scatter plots of VSCATTER vs stellar parameters, colored by label (blue = single, red = binary). Checks whether our VSCATTER-based labels are driven by systematics rather than true binarity.
+
+### Results — no systematic biases detected:
+
+- **VSCATTER vs Teff:** Binaries spread across the full 3500–7000 K range. No concentration at cool temperatures, ruling out pulsating giant contamination.
+- **VSCATTER vs logg:** Binaries appear at all surface gravities — both dwarfs (logg ~4-5) and giants (logg ~1-3). No systematic clustering.
+- **VSCATTER vs Combined S/N:** Binaries are not concentrated at low SNR. They appear across the full SNR range (up to ~4000). This confirms the labels are not noise-driven. The white band (0.3–1.0 km/s exclusion zone) is clearly visible between the two populations.
+- **VSCATTER vs [Fe/H]:** No trend with metallicity. Binaries span the full range from [Fe/H] ~ -2.5 to +0.5.
+
+### Interpretation:
+The clean separation between blue and red populations across all four parameters validates the labeling strategy. High VSCATTER is not a proxy for low SNR, cool temperature, or any other systematic — it genuinely reflects RV variability, consistent with binary orbital motion.
+
+## SB9 Catalog Cross-Match
+
+Cross-matched our 315K labeled sample against the SB9 (9th Catalogue of Spectroscopic Binary Orbits, 4,079 entries) at 2 arcsec radius. SB9 coordinates required conversion from sexagesimal (HH MM SS) to decimal degrees.
+
+### Results:
+- **Total matches:** 109 of our stars appear in SB9
+- **Our binary-labeled in SB9:** 77 (70.6% of matches)
+- **Our single-labeled in SB9:** 32 (29.4% of matches — "missed" binaries)
+- **Median separation:** 0.163 arcsec (excellent positional agreement)
+
+### Interpretation:
+- 70.6% precision against a gold-standard spectroscopic binary catalog validates the VSCATTER threshold approach.
+- The 32 missed binaries are likely long-period, low-amplitude, or face-on systems where RV variation stays below our 0.3 km/s single threshold. These are the hard cases where single-epoch ML detection could add the most value.
+- Only 109 matches out of 4,079 SB9 entries reflects the limited sky overlap between APOGEE's H-band survey and the optically-selected SB9 catalog, not a failure of the method.
+
+## Gaia DR3 NSS Cross-Match
+
+Cross-matched against Gaia DR3 non-single-star two-body orbit solutions (443,205 entries after removing NaN coordinates) at 2 arcsec radius.
+
+### Results:
+- **Total matches:** 1,300 of our stars appear in Gaia NSS
+- **Our binary-labeled in Gaia NSS:** 650 (50.0%)
+- **Our single-labeled in Gaia NSS:** 650 (50.0%)
+
+### Interpretation:
+- Lower recovery (50%) than SB9 (71%) is expected. Gaia NSS includes astrometric binaries, eclipsing binaries, and long-period systems detected through positional wobble or photometric dips — not RV variability. A face-on astrometric binary can have nearly zero RV variation.
+- The 650 Gaia binaries in our "single" class are not label errors — they're systems invisible to RV-based detection but detectable by Gaia's astrometric precision.
+- These "missed" binaries are a key opportunity for the CNN: if spectral signatures (composite spectra, broadened lines) are present even without RV variability, single-epoch ML could detect systems that VSCATTER fundamentally cannot.
+
+## Combined Validation Summary
+
+| Catalog      | Matches | Our Binary | Our Single | Precision |
+|-------------|---------|-----------|-----------|-----------|
+| SB9          | 109     | 77        | 32        | 70.6%     |
+| Gaia DR3 NSS | 1,300   | 650       | 650       | 50.0%     |
+
+The VSCATTER labeling strategy is well-validated for RV-variable binaries (SB9). The Gaia results highlight a complementary population of binaries detectable through other methods — potential targets for single-epoch spectral ML detection.
+
+## Spectral Preprocessing Notes
+
+### Why pick example spectra first
+We select a few example stars (3 binary, 3 single) to visually verify preprocessing before committing to the full 315K-star batch run (~6.4 GB). This serves as a sanity check: does bad pixel masking work? Does continuum normalization preserve absorption line shapes? Are binary vs single spectral differences actually visible?
+
+### Raw vs cleaned spectrum expectations
+- For high-SNR APOGEE stars (SNR >= 50), the difference between raw and cleaned spectra is usually subtle.
+- Bad pixels appear as sharp spikes or dips to zero/NaN — masking replaces these with interpolated values, smoothing out isolated glitches.
+- Detector edges between APOGEE's three chips (blue/green/red) can have artifacts that get cleaned up.
+- If raw and cleaned look nearly identical, that's a good sign — it means the APOGEE pipeline already produced high-quality data and our preprocessing isn't introducing artifacts.
+
+### Continuum normalization
+- This is where the bigger visual change happens. It flattens the overall spectral shape to ~1.0, so absorption lines are the only remaining features.
+- This is what the CNN actually needs — relative line depths and shapes, not the absolute flux level.
+- Two methods available: polynomial fit (iterative sigma-clipping to reject lines) and median filter. Polynomial is default.
+
+### Continuum normalization results (2M15044648+2224548)
+- **Top panel:** Raw flux ranges from ~32,000 to ~18,000 ADU across the H-band (15,150–17,000 A). Both polynomial (gray dashed) and median-filter (red) continua track the broad spectral slope well.
+- **Middle panel (polynomial):** Clean normalization to ~1.0. Flat continuum with sharp absorption lines dipping below. No distortion around deep features. This is the CNN input.
+- **Bottom panel (median filter):** Also reasonable, but slightly noisier around deep/broad absorption features — the median filter can struggle where strong lines occupy a significant fraction of the filter window.
+- **Decision:** Polynomial normalization is cleaner and more stable. Confirmed as the default method in PREPROCESS_CONFIG.
+- **Key absorption features visible:** Deep lines at ~15,750 A (Mg I), ~16,000 A (CO bandhead), and ~16,750 A (Al I) — these are the lines defined in FEATURE_CONFIG for the hand-crafted RF features.
