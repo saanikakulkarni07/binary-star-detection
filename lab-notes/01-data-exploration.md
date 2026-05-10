@@ -129,3 +129,88 @@ We select a few example stars (3 binary, 3 single) to visually verify preprocess
 - **Bottom panel (median filter):** Also reasonable, but slightly noisier around deep/broad absorption features — the median filter can struggle where strong lines occupy a significant fraction of the filter window.
 - **Decision:** Polynomial normalization is cleaner and more stable. Confirmed as the default method in PREPROCESS_CONFIG.
 - **Key absorption features visible:** Deep lines at ~15,750 A (Mg I), ~16,000 A (CO bandhead), and ~16,750 A (Al I) — these are the lines defined in FEATURE_CONFIG for the hand-crafted RF features.
+
+### CCF comparison: single vs binary
+- **Stars compared:** 2M21342357+1215247 (single, SNR=4469) vs 2M15044648+2224548 (binary, SNR=4096, VSCATTER=12.94 km/s)
+- **Visual appearance:** The CCF profiles look almost identical by eye — both show a single symmetric-looking peak. This is expected for an SB1 binary where one star dominates the light.
+- **Quantitative differences tell a different story:**
+
+| Metric | Single | Binary | Difference |
+|--------|--------|--------|------------|
+| FWHM | 28.9 km/s | 36.3 km/s | +25% broader |
+| Bisector span | -0.019 | -0.154 | 8x more asymmetric |
+| Asymmetry | 0.010 | -0.008 | Similar |
+
+- **Key insight:** The binary's CCF is 25% broader (line broadening from companion's blended light) and 8x more asymmetric (companion pulls line profile to one side). These differences are quantitatively real but visually subtle.
+- **Implication for ML:** This is exactly why we need a CNN — it can detect small, consistent differences across hundreds of absorption lines simultaneously, even though any single line or CCF looks "almost the same" to the eye. A human can't integrate these subtle signals across 8,575 pixels, but a neural network can.
+
+### Absorption line properties: single vs binary
+
+Measured equivalent width, line depth, FWHM, and asymmetry index across all H-band line regions (Brackett series, CO bandhead, OH, Mg I, Fe I, Al I) for the same single/binary pair.
+
+**Key patterns:**
+- **Line depths are systematically shallower for the binary** across nearly every region (e.g., Mg I: 0.213 vs 0.319, Al I: 0.090 vs 0.203, Fe I_0: 0.073 vs 0.166). The companion's continuum light fills in the absorption lines.
+- **Equivalent widths are smaller for the binary** — same dilution effect (e.g., Mg I: 1.06 vs 1.72).
+- **FWHM is similar or slightly broader for the binary** — subtle line broadening from the blended companion, consistent with the CCF FWHM finding.
+
+**Physical interpretation:** This is classic SB1 behavior. The secondary star adds continuum light (or differently-featured light), which dilutes the primary's absorption lines. The effect is systematic — it appears across all line regions, not just one — making it a strong multi-feature signal for ML.
+
+**Implication for RF baseline:** Features like line depth ratios, EW ratios, and the pattern of dilution across multiple lines should give the Random Forest discriminative power even without the full spectral context the CNN sees.
+
+## Random Forest Baseline (catalog features only)
+
+Trained RF (500 trees, max_depth=20, class_weight=balanced) on 5 catalog features: Teff, logg, [Fe/H], SNR, NVISITS. This is a minimal baseline — no spectral information.
+
+### Split:
+- Train: 220,631 (16,322 binary) / Val: 47,279 (3,498 binary) / Test: 47,279 (3,498 binary)
+
+### Results:
+- **5-fold CV AUROC: 0.699 +/- 0.005**
+- **Test AUROC: 0.703** — only modestly above random (0.50)
+- **Binary recall: 21%** — catches just 1 in 5 binaries
+- **Binary precision: 59%** — when it flags a binary, correct about half the time
+- **Accuracy: 93%** — misleading, driven by 92.6% single-class prevalence
+
+### ROC and PR curves:
+- **ROC:** Curve bows slightly above the diagonal but stays close — weak discriminative power.
+- **PR:** Precision is high (~90-95%) at very low recall (<10%), but drops off a cliff around 20-30% recall. No good operating point balances both precision and recall.
+
+### Interpretation:
+This proves that stellar parameters alone cannot reliably identify binaries. Teff, logg, and [Fe/H] describe a star's atmosphere, not whether it has a companion. The CNN on actual spectra should beat this significantly by detecting line broadening, dilution, and asymmetry patterns. This baseline sets the floor for comparison.
+
+### Feature importance (permutation importance):
+1. **logg** — highest. Binary systems can shift apparent surface gravity, and certain evolutionary stages (e.g., subgiants) have higher binary fractions.
+2. **Teff** — some temperature ranges are more binary-rich.
+3. **[Fe/H]** — mild correlation, possibly because metal-poor halo stars have different binary properties than disk stars.
+4. **NVISITS** — low importance. Observational metadata, not a physical property.
+5. **SNR** — lowest. Good — the model isn't cheating on survey selection effects.
+
+None of these features capture individual binary signatures. They reflect population-level correlations (e.g., "subgiants are more likely to be binaries") rather than spectral evidence of a companion. This is fundamentally different from what the CNN will learn from actual spectra.
+
+## CNN Results (10K spectra, first run)
+
+Trained 1D CNN (1.1M parameters) on ~10K continuum-normalized APOGEE spectra (~740 binary). Early stopping at epoch 25, best val AUROC at epoch 15.
+
+### Training:
+- Best val AUROC: **0.7362** — beats RF baseline (0.703) using spectral information
+- Val loss unstable (spikes to 9.89 at epoch 23) — outlier spectra cause instability
+- Train loss decreasing steadily (1.27 → 0.79), some overfitting remains
+
+### Test set evaluation:
+- **Test AUROC: 0.7118**
+- **Binary recall: 77%** — catches 3 out of 4 binaries (vs RF's 21%)
+- **Binary precision: 10%** — many false positives at default 0.5 threshold
+- **Accuracy: 50%** — threshold is too aggressive, flagging too many singles as binaries
+
+### Comparison with RF baseline:
+| Metric | RF (catalog features) | CNN (10K spectra) |
+|--------|----------------------|-------------------|
+| AUROC | 0.703 | 0.712 |
+| Binary recall | 21% | 77% |
+| Binary precision | 59% | 10% |
+
+### Interpretation:
+- The CNN finds far more binaries (77% recall vs 21%) but at the cost of many false positives (10% precision). The RF is conservative (high precision, low recall); the CNN is aggressive.
+- The low precision reflects both the small training set (10K) and the class imbalance (only ~7% binary). With more data, the CNN should learn to be more selective.
+- AUROC is comparable (0.71 vs 0.70), suggesting the CNN is learning real signal but needs more data to separate from the RF. The improvement from 550 → 10K spectra (0.69 → 0.74 val AUROC) predicts further gains at 50K+.
+- **Next step:** Scale to 50K+ spectra to reduce overfitting and improve precision while maintaining high recall.
